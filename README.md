@@ -1,4 +1,21 @@
-# GitNexus
+# GitNexus-Cangjie
+
+## About this fork (GitNexus-Cangjie `1.4.10-cj`)
+
+This repo extends [GitNexus](https://github.com/abhigyanpatwari/gitnexus) with **Cangjie** (`.cj`) support in the indexer and graph pipeline, using a Cangjie Tree-sitter grammar. The CLI can be installed as **`gitnexus-cj`** so it does not replace the stock **`gitnexus`** npm package.
+
+Fork home: https://github.com/Trenza1ore/GitNexus-Cangjie
+
+### How to install the CLI as `gitnexus-cj`
+```bash
+cd gitnexus
+CXXFLAGS='-std=c++20' npm install
+npm run build
+npm install -g .
+```
+
+---
+
 ⚠️ Important Notice:** GitNexus has NO official cryptocurrency, token, or coin. Any token/coin using the GitNexus name on Pump.fun or any other platform is **not affiliated with, endorsed by, or created by** this project or its maintainers. Do not purchase any cryptocurrency claiming association with GitNexus.
 
 <div align="center">

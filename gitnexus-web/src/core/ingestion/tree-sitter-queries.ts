@@ -594,5 +594,6 @@ export const LANGUAGE_QUERIES: Record<SupportedLanguages, string> = {
   [SupportedLanguages.Kotlin]: '', // Kotlin WASM parser not yet available for web
   [SupportedLanguages.Swift]: SWIFT_QUERIES,
   [SupportedLanguages.Dart]: DART_QUERIES,
+  [SupportedLanguages.Cangjie]: '', // Native CLI only — web bundle has no Cangjie WASM parser
 };
  

@@ -132,6 +132,7 @@ export const processHeritage = async (
         // Skip files that can't be parsed
         continue;
       }
+      if (!tree) continue;
       // Cache re-parsed tree for potential future use
       astCache.set(file.path, tree);
     }

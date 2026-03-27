@@ -34,10 +34,10 @@ describe('CLI commands', () => {
   });
 
   describe('package.json bin entry', () => {
-    it('exposes gitnexus binary', async () => {
+    it('exposes gitnexus-cj binary (distinct from npm package gitnexus)', async () => {
       const pkg = await import('../../package.json', { with: { type: 'json' } });
       expect(pkg.default.bin).toBeDefined();
-      expect(pkg.default.bin.gitnexus || pkg.default.bin).toBeDefined();
+      expect(pkg.default.bin['gitnexus-cj']).toBeDefined();
     });
   });
 

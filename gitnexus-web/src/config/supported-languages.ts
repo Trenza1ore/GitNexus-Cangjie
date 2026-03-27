@@ -12,5 +12,6 @@ export enum SupportedLanguages {
     Ruby = 'ruby',
     Kotlin = 'kotlin',
     Swift = 'swift',
+    Cangjie = 'cangjie',
     Dart = 'dart',
 }

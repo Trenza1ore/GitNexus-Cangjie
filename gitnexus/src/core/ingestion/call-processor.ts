@@ -348,6 +348,7 @@ export const processCalls = async (
       } catch (parseError) {
         continue;
       }
+      if (!tree) continue;
       astCache.set(file.path, tree);
     }
 
@@ -1608,6 +1609,7 @@ export const extractFetchCallsFromFiles = async (
       try {
         tree = parser.parse(file.content, undefined, { bufferSize: getTreeSitterBufferSize(file.content.length) });
       } catch { continue; }
+      if (!tree) continue;
       astCache.set(file.path, tree);
     }
 

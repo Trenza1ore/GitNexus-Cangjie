@@ -297,6 +297,7 @@ export const processImports = async (
         continue;
       }
       wasReparsed = true;
+      if (!tree) continue;
       // Cache re-parsed tree so call/heritage phases get hits
       astCache.set(file.path, tree);
     }
@@ -319,7 +320,7 @@ export const processImports = async (
         console.groupEnd();
       }
 
-      if (wasReparsed) (tree as any).delete?.();
+      if (wasReparsed) (tree as any)?.delete?.();
       continue;
     }
 

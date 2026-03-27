@@ -7,6 +7,8 @@ Works with **Cursor**, **Claude Code**, **Codex**, **Windsurf**, **Cline**, **Op
 [![npm version](https://img.shields.io/npm/v/gitnexus.svg)](https://www.npmjs.com/package/gitnexus)
 [![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm%20Noncommercial-blue.svg)](https://polyformproject.org/licenses/noncommercial/1.0.0/)
 
+**CLI from this package:** installs as **`gitnexus-cj`** (`npm install -g` / local `node_modules/.bin`) so it does not collide with the **`gitnexus`** command from the main npm release. Examples below use `gitnexus-cj`; substitute `npx -y gitnexus@latest …` if you use the registry package instead.
+
 ---
 
 ## Why?
@@ -19,14 +21,14 @@ AI coding tools don't understand your codebase structure. They edit a function w
 
 ```bash
 # Index your repo (run from repo root)
-npx gitnexus analyze
+npx gitnexus-cj analyze
 ```
 
 That's it. This indexes the codebase, installs agent skills, registers Claude Code hooks, and creates `AGENTS.md` / `CLAUDE.md` context files — all in one command.
 
-To configure MCP for your editor, run `npx gitnexus setup` once — or set it up manually below.
+To configure MCP for your editor, run `npx gitnexus-cj setup` once — or set it up manually below.
 
-`gitnexus setup` auto-detects your editors and writes the correct global MCP config. You only need to run it once.
+`gitnexus-cj setup` auto-detects your editors and writes the correct global MCP config. You only need to run it once.
 
 ### Editor Support
 
@@ -48,16 +50,22 @@ To configure MCP for your editor, run `npx gitnexus setup` once — or set it up
 
 ## MCP Setup (manual)
 
-If you prefer to configure manually instead of using `gitnexus setup`:
+If you prefer to configure manually instead of using `gitnexus-cj setup`:
 
 ### Claude Code (full support — MCP + skills + hooks)
 
 ```bash
-# macOS / Linux
+# macOS / Linux — published npm package (default name `gitnexus` on PATH)
 claude mcp add gitnexus -- npx -y gitnexus@latest mcp
 
 # Windows
 claude mcp add gitnexus -- cmd /c npx -y gitnexus@latest mcp
+```
+
+After `npm install -g /path/to/gitnexus` (this tree), use the global binary:
+
+```bash
+claude mcp add gitnexus-cj -- gitnexus-cj mcp
 ```
 
 ### Codex (full support — MCP + skills)
@@ -149,20 +157,20 @@ Your AI agent gets these tools automatically:
 ## CLI Commands
 
 ```bash
-gitnexus setup                    # Configure MCP for your editors (one-time)
-gitnexus analyze [path]           # Index a repository (or update stale index)
-gitnexus analyze --force          # Force full re-index
-gitnexus analyze --embeddings     # Enable embedding generation (slower, better search)
-gitnexus analyze --verbose        # Log skipped files when parsers are unavailable
-gitnexus mcp                     # Start MCP server (stdio) — serves all indexed repos
-gitnexus serve                   # Start local HTTP server (multi-repo) for web UI
-gitnexus index                   # Register an existing .gitnexus/ folder into the global registry
-gitnexus list                    # List all indexed repositories
-gitnexus status                  # Show index status for current repo
-gitnexus clean                   # Delete index for current repo
-gitnexus clean --all --force     # Delete all indexes
-gitnexus wiki [path]             # Generate LLM-powered docs from knowledge graph
-gitnexus wiki --model <model>    # Wiki with custom LLM model (default: gpt-4o-mini)
+gitnexus-cj setup                    # Configure MCP for your editors (one-time)
+gitnexus-cj analyze [path]           # Index a repository (or update stale index)
+gitnexus-cj analyze --force          # Force full re-index
+gitnexus-cj analyze --embeddings     # Enable embedding generation (slower, better search)
+gitnexus-cj analyze --verbose        # Log skipped files when parsers are unavailable
+gitnexus-cj mcp                     # Start MCP server (stdio) — serves all indexed repos
+gitnexus-cj serve                   # Start local HTTP server (multi-repo) for web UI
+gitnexus-cj index                   # Register an existing .gitnexus/ folder into the global registry
+gitnexus-cj list                    # List all indexed repositories
+gitnexus-cj status                  # Show index status for current repo
+gitnexus-cj clean                   # Delete index for current repo
+gitnexus-cj clean --all --force     # Delete all indexes
+gitnexus-cj wiki [path]             # Generate LLM-powered docs from knowledge graph
+gitnexus-cj wiki --model <model>    # Wiki with custom LLM model (default: gpt-4o-mini)
 ```
 
 ## Remote Embeddings
@@ -174,18 +182,18 @@ export GITNEXUS_EMBEDDING_URL=http://your-server:8080/v1
 export GITNEXUS_EMBEDDING_MODEL=BAAI/bge-large-en-v1.5
 export GITNEXUS_EMBEDDING_DIMS=1024          # optional, default 384
 export GITNEXUS_EMBEDDING_API_KEY=your-key   # optional, default: "unused"
-gitnexus analyze . --embeddings
+gitnexus-cj analyze . --embeddings
 ```
 
 Works with Infinity, vLLM, TEI, llama.cpp, Ollama, LM Studio, or OpenAI. When unset, local embeddings are used unchanged.
 
 ## Multi-Repo Support
 
-GitNexus supports indexing multiple repositories. Each `gitnexus analyze` registers the repo in a global registry (`~/.gitnexus/registry.json`). The MCP server serves all indexed repos automatically.
+GitNexus supports indexing multiple repositories. Each `gitnexus-cj analyze` registers the repo in a global registry (`~/.gitnexus/registry.json`). The MCP server serves all indexed repos automatically.
 
 ## Supported Languages
 
-TypeScript, JavaScript, Python, Java, C, C++, C#, Go, Rust, PHP, Kotlin, Swift, Ruby
+TypeScript, JavaScript, Python, Java, C, C++, C#, Go, Rust, PHP, Kotlin, Swift, Ruby, Cangjie (`.cj`)
 
 ### Language Feature Matrix
 
@@ -204,6 +212,7 @@ TypeScript, JavaScript, Python, Java, C, C++, C#, Go, Rust, PHP, Kotlin, Swift, 
 | Swift | — | — | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | C | — | — | ✓ | — | ✓ | ✓ | — | ✓ | ✓ |
 | C++ | — | — | ✓ | ✓ | ✓ | ✓ | — | ✓ | ✓ |
+| Cangjie | ✓ | — | ✓ | ✓ | — | — | — | — | ✓ |
 
 **Imports** — cross-file import resolution · **Named Bindings** — `import { X as Y }` / re-export tracking · **Exports** — public/exported symbol detection · **Heritage** — class inheritance, interfaces, mixins · **Type Annotations** — explicit type extraction for receiver resolution · **Constructor Inference** — infer receiver type from constructor calls (`self`/`this` resolution included for all languages) · **Config** — language toolchain config parsing (tsconfig, go.mod, etc.) · **Frameworks** — AST-based framework pattern detection · **Entry Points** — entry point scoring heuristics
 
@@ -216,11 +225,12 @@ GitNexus ships with skill files that teach AI agents how to use the tools effect
 - **Impact Analysis** — Analyze blast radius before changes
 - **Refactoring** — Plan safe refactors using dependency mapping
 
-Installed automatically by both `gitnexus analyze` (per-repo) and `gitnexus setup` (global).
+Installed automatically by both `gitnexus-cj analyze` (per-repo) and `gitnexus-cj setup` (global).
 
 ## Requirements
 
-- Node.js >= 18
+- Node.js >= 20
+- **Native install (`npm install` in `gitnexus/`):** on Node.js 22+, the `tree-sitter` runtime builds from source and may require a C++20 toolchain. If the build fails, run `CXXFLAGS='-std=c++20' npm install` or `npm run install:with-cpp20`.
 - Git repository (uses git for commit tracking)
 
 ## Privacy
@@ -234,7 +244,7 @@ Installed automatically by both `gitnexus analyze` (per-repo) and `gitnexus setu
 
 GitNexus also has a browser-based UI at [gitnexus.vercel.app](https://gitnexus.vercel.app) — 100% client-side, your code never leaves the browser.
 
-**Local Backend Mode:** Run `gitnexus serve` and open the web UI locally — it auto-detects the server and shows all your indexed repos, with full AI chat support. No need to re-upload or re-index. The agent's tools (Cypher queries, search, code navigation) route through the backend HTTP API automatically.
+**Local Backend Mode:** Run `gitnexus-cj serve` and open the web UI locally — it auto-detects the server and shows all your indexed repos, with full AI chat support. No need to re-upload or re-index. The agent's tools (Cypher queries, search, code navigation) route through the backend HTTP API automatically.
 
 ## License
 

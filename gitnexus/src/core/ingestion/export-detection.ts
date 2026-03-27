@@ -220,3 +220,17 @@ export const rubyExportChecker: ExportChecker = (_node, _name) => true;
 /** Dart: public if no leading underscore (convention, same as Python). */
 export const dartExportChecker: ExportChecker = (_node, name) => !name.startsWith('_');
 
+/** Cangjie: package-visible unless explicitly `private` / `internal` in ancestor modifiers. */
+export const cangjieExportChecker: ExportChecker = (node, _name) => {
+  let current: SyntaxNode | null = node;
+  while (current) {
+    if (current.type === 'modifiers') {
+      const t = current.text || '';
+      if (/\bprivate\b/.test(t) || /\binternal\b/.test(t)) return false;
+      if (/\bpublic\b/.test(t) || /\bprotected\b/.test(t)) return true;
+    }
+    current = current.parent;
+  }
+  return true;
+};
+

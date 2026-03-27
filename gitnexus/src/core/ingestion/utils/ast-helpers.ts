@@ -12,10 +12,10 @@ export type SyntaxNode = Parser.SyntaxNode;
  * Used to extract the definition node from a capture map.
  */
 export const DEFINITION_CAPTURE_KEYS = [
+  'definition.method',
   'definition.function',
   'definition.class',
   'definition.interface',
-  'definition.method',
   'definition.struct',
   'definition.enum',
   'definition.namespace',
@@ -82,6 +82,10 @@ export const FUNCTION_NODE_TYPES = new Set([
   // Ruby
   'method',           // def foo
   'singleton_method', // def self.foo
+  // Cangjie
+  'functionDefinition',
+  'operatorFunctionDefinition',
+  'init',
   // Dart
   'function_signature',
   'method_signature',
@@ -108,6 +112,12 @@ export const CLASS_CONTAINER_TYPES = new Set([
   'class_definition',
   'trait_declaration',
   'protocol_declaration',
+  // Cangjie
+  'classDefinition',
+  'interfaceDefinition',
+  'structDefinition',
+  'enumDefinition',
+  'extendDefinition',
   // Ruby
   'class',
   'module',
@@ -131,6 +141,11 @@ export const CONTAINER_TYPE_TO_LABEL: Record<string, string> = {
   trait_declaration: 'Trait',
   record_declaration: 'Record',
   protocol_declaration: 'Interface',
+  classDefinition: 'Class',
+  interfaceDefinition: 'Interface',
+  structDefinition: 'Struct',
+  enumDefinition: 'Enum',
+  extendDefinition: 'Class',
   class: 'Class',
   module: 'Module',
   object_declaration: 'Class',
@@ -162,6 +177,7 @@ export function getLabelFromCaptures(
   if (captureMap['import'] || captureMap['call']) return null;
   if (!captureMap['name'] && !captureMap['definition.constructor']) return null;
 
+  if (captureMap['definition.method']) return 'Method';
   if (captureMap['definition.function']) {
     if (provider.labelOverride) {
       const override = provider.labelOverride(captureMap['definition.function'], 'Function');
@@ -171,7 +187,6 @@ export function getLabelFromCaptures(
   }
   if (captureMap['definition.class']) return 'Class';
   if (captureMap['definition.interface']) return 'Interface';
-  if (captureMap['definition.method']) return 'Method';
   if (captureMap['definition.struct']) return 'Struct';
   if (captureMap['definition.enum']) return 'Enum';
   if (captureMap['definition.namespace']) return 'Namespace';
@@ -198,6 +213,32 @@ export function getLabelFromCaptures(
 export const findEnclosingClassId = (node: any, filePath: string): string | null => {
   let current = node.parent;
   while (current) {
+    // Cangjie: camelCase containers use *Name children
+    if (current.type === 'classDefinition') {
+      const cn = current.namedChildren?.find((c: any) => c.type === 'className');
+      if (cn?.text) return generateId('Class', `${filePath}:${cn.text}`);
+    }
+    if (current.type === 'interfaceDefinition') {
+      const n = current.namedChildren?.find((c: any) => c.type === 'interfaceName');
+      if (n?.text) return generateId('Interface', `${filePath}:${n.text}`);
+    }
+    if (current.type === 'structDefinition') {
+      const n = current.namedChildren?.find((c: any) => c.type === 'structName');
+      if (n?.text) return generateId('Struct', `${filePath}:${n.text}`);
+    }
+    if (current.type === 'enumDefinition') {
+      const n = current.namedChildren?.find((c: any) => c.type === 'enumName');
+      if (n?.text) return generateId('Enum', `${filePath}:${n.text}`);
+    }
+    if (current.type === 'extendDefinition') {
+      const et = current.namedChildren?.find((c: any) => c.type === 'extendType');
+      if (et) {
+        const idNode = et.namedChildren?.find(
+          (c: any) => c.type === 'identifier' || c.type === 'scoped_identifier',
+        );
+        if (idNode?.text) return generateId('Class', `${filePath}:${idNode.text}`);
+      }
+    }
     // Go: method_declaration has a receiver parameter with the struct type
     if (current.type === 'method_declaration') {
       const receiver = current.childForFieldName?.('receiver');
@@ -291,6 +332,36 @@ export const extractFunctionName = (node: SyntaxNode): { funcName: string | null
       funcName: node.type === 'init_declaration' ? 'init' : 'deinit',
       label: 'Constructor',
     };
+  }
+
+  // Cangjie: init / func / operator — member bodies use Method label for enclosing-function IDs
+  if (node.type === 'init') {
+    return { funcName: 'init', label: 'Constructor' };
+  }
+  if (node.type === 'functionDefinition' || node.type === 'operatorFunctionDefinition') {
+    let insideMember = false;
+    let a: SyntaxNode | null = node.parent;
+    const cjBodies = new Set([
+      'classBody', 'structBody', 'interfaceBody', 'extendBody', 'enumBody',
+    ]);
+    while (a) {
+      if (cjBodies.has(a.type)) {
+        insideMember = true;
+        break;
+      }
+      a = a.parent;
+    }
+    const memberLabel: NodeLabel = insideMember ? 'Method' : 'Function';
+    for (let i = 0; i < node.namedChildCount; i++) {
+      const c = node.namedChild(i);
+      if (c?.type === 'funcName' && c.text) {
+        return { funcName: c.text, label: memberLabel };
+      }
+      if (node.type === 'operatorFunctionDefinition' && c?.type === 'operator' && c.text) {
+        return { funcName: c.text, label: memberLabel };
+      }
+    }
+    return { funcName: null, label: memberLabel };
   }
 
   if (FUNCTION_DECLARATION_TYPES.has(node.type)) {
@@ -500,7 +571,7 @@ export const extractMethodSignature = (node: SyntaxNode | null | undefined): Met
   if (!node) return { parameterCount, requiredParameterCount: undefined, parameterTypes: undefined, returnType };
 
   const paramListTypes = new Set([
-    'formal_parameters', 'parameters', 'parameter_list',
+    'formal_parameters', 'parameters', 'parameter_list', 'parameterList',
     'function_parameters', 'method_parameters', 'function_value_parameters',
     'formal_parameter_list', // Dart
   ]);
@@ -715,6 +786,14 @@ export const extractMethodSignature = (node: SyntaxNode | null | undefined): Met
         returnType = child.text;
         break;
       }
+    }
+  }
+
+  // Cangjie: returnType field on functionDefinition / init / operatorFunctionDefinition
+  if (!returnType) {
+    const cjReturn = node.childForFieldName?.('returnType');
+    if (cjReturn && cjReturn.text && cjReturn.text !== 'Unit') {
+      returnType = cjReturn.text;
     }
   }
 

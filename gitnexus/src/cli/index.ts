@@ -11,8 +11,10 @@ const _require = createRequire(import.meta.url);
 const pkg = _require('../../package.json');
 const program = new Command();
 
+const programName = process.env.GITNEXUS_PROGRAM_NAME || 'gitnexus';
+
 program
-  .name('gitnexus')
+  .name(programName)
   .description('GitNexus local CLI and MCP server')
   .version(pkg.version);
 

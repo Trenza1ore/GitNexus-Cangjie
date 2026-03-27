@@ -210,10 +210,11 @@ function handlePostToolUse(input) {
   // If HEAD matches last indexed commit, no reindex needed
   if (currentHead && currentHead === lastCommit) return;
 
-  const analyzeCmd = `npx gitnexus analyze${hadEmbeddings ? ' --embeddings' : ''}`;
+  const analyzeCmd = `gitnexus-cj analyze${hadEmbeddings ? ' --embeddings' : ''}`;
+  const analyzeFallback = `npx -y gitnexus@latest analyze${hadEmbeddings ? ' --embeddings' : ''}`;
   sendHookResponse('PostToolUse',
     `GitNexus index is stale (last indexed: ${lastCommit ? lastCommit.slice(0, 7) : 'never'}). ` +
-    `Run \`${analyzeCmd}\` to update the knowledge graph.`
+    `Run \`${analyzeCmd}\` (this package) or \`${analyzeFallback}\` (npm registry) to update the knowledge graph.`
   );
 }
 

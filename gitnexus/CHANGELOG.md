@@ -2,6 +2,14 @@
 
 All notable changes to GitNexus will be documented in this file.
 
+## [1.4.10-cj] - 2026-03-27
+
+### Added
+- **Cangjie** (`.cj`) — `tree-sitter-cangjie` grammar, queries, wildcard/package import resolution (`cangjie/` layout), Ladybug schema edges from `Enum` to methods/constructors/properties, CLI indexing + workers. **Requires `tree-sitter` 0.25.x** (language ABI 15). On Node 22+, native builds may need `CXXFLAGS='-std=c++20'` or `npm run install:with-cpp20`. Postinstall patches `tree-sitter` for Cangjie `External` language handles.
+
+### Changed
+- **CLI binary** — npm installs from this package expose **`gitnexus-cj`** only (via `bin/gitnexus-cj.mjs` + `GITNEXUS_PROGRAM_NAME`), so `npm install -g` does not overwrite the **`gitnexus`** command from the main npm release. Direct `node dist/cli/index.js` still defaults to the `gitnexus` program name.
+
 ## [1.4.10] - 2026-03-27
 
 ### Fixed

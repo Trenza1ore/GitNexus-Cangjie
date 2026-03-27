@@ -28,6 +28,8 @@ export const EXTENSIONS = [
   '.php', '.phtml',
   // Swift
   '.swift',
+  // Cangjie
+  '.cj',
   // Ruby
   '.rb',
 ];

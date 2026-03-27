@@ -22,6 +22,8 @@ export const getLanguageFromFilename = (filename: string): SupportedLanguages | 
   if (filename.endsWith('.py')) return SupportedLanguages.Python;
   // Java
   if (filename.endsWith('.java')) return SupportedLanguages.Java;
+  // Cangjie (must precede `.c` — `.cj` ends with `c`)
+  if (filename.endsWith('.cj')) return SupportedLanguages.Cangjie;
   // C source files
   if (filename.endsWith('.c')) return SupportedLanguages.C;
   // C++ (all common extensions, including .h)

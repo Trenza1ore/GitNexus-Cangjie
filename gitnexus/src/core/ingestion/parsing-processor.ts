@@ -243,6 +243,11 @@ const processParsingSequential = async (
       continue;
     }
 
+    if (!tree) {
+      console.warn(`Skipping file with null parse tree: ${file.path}`);
+      continue;
+    }
+
     astCache.set(file.path, tree);
 
     const provider = getProvider(language);

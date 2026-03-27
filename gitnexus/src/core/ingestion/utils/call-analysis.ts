@@ -9,6 +9,7 @@ export const CALL_EXPRESSION_TYPES = new Set([
   'nullsafe_member_call_expression',   // PHP ?.
   'call',                              // Python/Ruby
   'invocation_expression',             // C#
+  'postfixExpression',                 // Cangjie (query captures call-shaped postfix)
 ]);
 
 /**
@@ -23,6 +24,18 @@ export const MAX_CHAIN_DEPTH = 3;
  */
 export const countCallArguments = (callNode: SyntaxNode | null | undefined): number | undefined => {
   if (!callNode) return undefined;
+
+  // Cangjie: postfixExpression ends with callSuffix — count named argument expressions
+  if (callNode.type === 'postfixExpression') {
+    const suffix = callNode.namedChildren.find((c) => c.type === 'callSuffix');
+    if (!suffix) return undefined;
+    let count = 0;
+    for (const c of suffix.namedChildren) {
+      if (c.type === 'comment') continue;
+      count++;
+    }
+    return count;
+  }
 
   // Direct field or direct child (most languages)
   let argsNode: SyntaxNode | null | undefined = callNode.childForFieldName('arguments')
@@ -65,6 +78,7 @@ const MEMBER_ACCESS_NODE_TYPES = new Set([
   'navigation_suffix',           // Kotlin/Swift: obj.method() — nameNode sits inside navigation_suffix
   'member_binding_expression',   // C#: user?.Method() — null-conditional access
   'unconditional_assignable_selector', // Dart: obj.method() — nameNode inside selector > unconditional_assignable_selector
+  'fieldAccess',                   // Cangjie: .method in postfixExpression
 ]);
 
 /**
@@ -104,6 +118,16 @@ export const inferCallForm = (
   // 1. Constructor: callNode itself is a constructor invocation (Kotlin)
   if (CONSTRUCTOR_CALL_NODE_TYPES.has(callNode.type)) {
     return 'constructor';
+  }
+
+  // Cangjie: postfixExpression — member if callee name sits under fieldAccess before outer callSuffix
+  if (callNode.type === 'postfixExpression') {
+    let p: SyntaxNode | null = nameNode.parent;
+    while (p && p !== callNode) {
+      if (p.type === 'fieldAccess') return 'member';
+      p = p.parent;
+    }
+    return 'free';
   }
 
   // 2. Member call: nameNode's parent is a member-access wrapper
@@ -161,6 +185,7 @@ const SIMPLE_RECEIVER_TYPES = new Set([
   'base',              // C# base.Method()
   'parent',            // PHP parent::method()
   'constant',          // Ruby CONSTANT.method() (uppercase identifiers)
+  'thisSuperExpression', // Cangjie: this / super
 ]);
 
 export const extractReceiverName = (
@@ -237,6 +262,18 @@ export const extractReceiverName = (
           receiver = child;
           break;
         }
+      }
+    }
+  }
+
+  // Cangjie: fieldAccess inside postfixExpression — receiver is first named child of inner postfix
+  if (!receiver) {
+    let p: SyntaxNode | null = nameNode.parent;
+    while (p && p.type !== 'fieldAccess') p = p.parent;
+    if (p?.type === 'fieldAccess') {
+      const innerPostfix = p.parent;
+      if (innerPostfix?.type === 'postfixExpression') {
+        receiver = innerPostfix.firstNamedChild;
       }
     }
   }
@@ -329,6 +366,17 @@ export const extractReceiverNode = (
     }
   }
 
+  if (!receiver) {
+    let p: SyntaxNode | null = nameNode.parent;
+    while (p && p.type !== 'fieldAccess') p = p.parent;
+    if (p?.type === 'fieldAccess') {
+      const innerPostfix = p.parent;
+      if (innerPostfix?.type === 'postfixExpression') {
+        receiver = innerPostfix.firstNamedChild;
+      }
+    }
+  }
+
   return receiver ?? undefined;
 };
 
@@ -341,6 +389,7 @@ const FIELD_ACCESS_NODE_TYPES = new Set([
   'selector_expression',         // Go
   'field_expression',            // Rust/C++
   'field_access',                // Java
+  'fieldAccess',                 // Cangjie
   'attribute',                   // Python
   'navigation_expression',       // Kotlin/Swift
   'member_binding_expression',   // C# null-conditional (user?.Address)

@@ -1147,6 +1147,72 @@ export const DART_QUERIES = `
       (type_identifier) @heritage.trait))) @heritage
 `;
 
+// Cangjie — tree-sitter-cangjie (仓颉). See grammar queries/tags.scm for symbol anchors.
+export const CANGJIE_QUERIES = `
+(classDefinition (className) @name) @definition.class
+(interfaceDefinition (interfaceName) @name) @definition.interface
+(structDefinition (structName) @name) @definition.struct
+(enumDefinition (enumName) @name) @definition.enum
+; Free functions / operators (members use @definition.method patterns below — labelOverride skips duplicate @definition.function)
+(functionDefinition (funcName) @name) @definition.function
+(operatorFunctionDefinition (operator) @name) @definition.function
+
+; Type members — same AST node as top-level func, distinct graph role (HAS_METHOD / Method)
+(classBody (functionDefinition (funcName) @name) @definition.method)
+(classBody (operatorFunctionDefinition (operator) @name) @definition.method)
+(structBody (functionDefinition (funcName) @name) @definition.method)
+(structBody (operatorFunctionDefinition (operator) @name) @definition.method)
+(interfaceBody (functionDefinition (funcName) @name) @definition.method)
+(interfaceBody (operatorFunctionDefinition (operator) @name) @definition.method)
+(extendBody (functionDefinition (funcName) @name) @definition.method)
+(extendBody (operatorFunctionDefinition (operator) @name) @definition.method)
+(enumBody (functionDefinition (funcName) @name) @definition.method)
+(enumBody (operatorFunctionDefinition (operator) @name) @definition.method)
+
+(macroDefinition (macroName) @name) @definition.macro
+(typeAlias (typeAliasName) @name) @definition.type
+(propertyDefinition (propertyName) @name) @definition.property
+(variableDeclaration (variableName) @name) @definition.const
+(init) @definition.constructor
+
+(importList
+  packageName: (_) @import.source) @import
+
+; Calls: foo() and obj.method() via postfixExpression + callSuffix
+(postfixExpression
+  (identifier) @call.name
+  (callSuffix)) @call
+
+(postfixExpression
+  (postfixExpression
+    (_)
+    (fieldAccess (atomicVariable (varBindingPattern) @call.name)))
+  (callSuffix)) @call
+
+; Heritage: class Foo <: Bar
+(classDefinition
+  (className) @heritage.class
+  (superOrInterface (_) @heritage.extends)) @heritage
+
+(interfaceDefinition
+  (interfaceName) @heritage.class
+  (superOrInterface (_) @heritage.extends)) @heritage
+
+(structDefinition
+  (structName) @heritage.class
+  (superOrInterface (_) @heritage.extends)) @heritage
+
+(enumDefinition
+  (enumName) @heritage.class
+  (superOrInterface (_) @heritage.extends)) @heritage
+
+(assignmentExpression
+  variable: (postfixExpression
+    (_) @assignment.receiver
+    (fieldAccess (atomicVariable (varBindingPattern) @assignment.property)))
+  value: (_)) @assignment
+`;
+
 import { SupportedLanguages } from '../../config/supported-languages.js';
 
 export const LANGUAGE_QUERIES: Record<SupportedLanguages, string> = {
@@ -1164,5 +1230,6 @@ export const LANGUAGE_QUERIES: Record<SupportedLanguages, string> = {
   [SupportedLanguages.Ruby]: RUBY_QUERIES,
   [SupportedLanguages.Swift]: SWIFT_QUERIES,
   [SupportedLanguages.Dart]: DART_QUERIES,
+  [SupportedLanguages.Cangjie]: CANGJIE_QUERIES,
   [SupportedLanguages.Cobol]: '', // Standalone regex processor — no tree-sitter queries
 };

@@ -29,6 +29,7 @@ describe('Query compilation smoke tests', () => {
     [SupportedLanguages.PHP]: 'test.php',
     [SupportedLanguages.Kotlin]: 'Test.kt',
     [SupportedLanguages.Swift]: 'test.swift',
+    [SupportedLanguages.Cangjie]: 'test.cj',
   };
 
   // Known query compilation failures — remove from this set as PRs fix them

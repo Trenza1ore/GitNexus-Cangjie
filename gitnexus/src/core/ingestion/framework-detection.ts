@@ -597,6 +597,7 @@ export const AST_FRAMEWORK_PATTERNS_BY_LANGUAGE = {
     { framework: 'rails', entryPointMultiplier: 3.0, reason: 'rails-pattern', patterns: FRAMEWORK_AST_PATTERNS.rails },
     { framework: 'sinatra', entryPointMultiplier: 2.8, reason: 'sinatra-pattern', patterns: FRAMEWORK_AST_PATTERNS.sinatra },
   ],
+  [SupportedLanguages.Cangjie]: [],
   [SupportedLanguages.Dart]: [
     { framework: 'flutter', entryPointMultiplier: 2.5, reason: 'flutter-widget', patterns: FRAMEWORK_AST_PATTERNS.flutter },
     { framework: 'riverpod', entryPointMultiplier: 2.8, reason: 'riverpod-pattern', patterns: FRAMEWORK_AST_PATTERNS.riverpod },

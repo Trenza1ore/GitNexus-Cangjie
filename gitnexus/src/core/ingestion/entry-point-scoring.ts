@@ -14,7 +14,7 @@ import { detectFrameworkFromPath } from './framework-detection.js';
 import { SupportedLanguages } from '../../config/supported-languages.js';
 
 // ============================================================================
-// NAME PATTERNS - All 13 supported languages
+// NAME PATTERNS - All supported languages
 // ============================================================================
 
 /**
@@ -225,6 +225,9 @@ export const ENTRY_POINT_PATTERNS = {
     /^runApp$/,           // App entry point
     /^onEvent$/,          // BLoC event handler
     /^mapEventToState$/,  // Legacy BLoC pattern
+  ],
+  [SupportedLanguages.Cangjie]: [
+    /^main$/,
   ],
   [SupportedLanguages.Cobol]: [], // Standalone regex processor — no tree-sitter entry points
 } satisfies Record<SupportedLanguages, RegExp[]>;

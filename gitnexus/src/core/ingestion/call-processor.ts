@@ -10,7 +10,7 @@ import { generateId } from '../../lib/utils.js';
 import { getLanguageFromFilename } from './utils/language-detection.js';
 import { isVerboseIngestionEnabled } from './utils/verbose.js';
 import { yieldToEventLoop } from './utils/event-loop.js';
-import { FUNCTION_NODE_TYPES, extractFunctionName, findEnclosingClassId } from './utils/ast-helpers.js';
+import { FUNCTION_NODE_TYPES, extractFunctionName, findEnclosingClassId, findEnclosingClassLikeTypeName } from './utils/ast-helpers.js';
 import {
   countCallArguments,
   inferCallForm,
@@ -479,7 +479,7 @@ export const processCalls = async (
 
           case 'properties': {
             const fileId = generateId('File', file.path);
-            const propEnclosingClassId = findEnclosingClassId(captureMap['call'], file.path);
+            const propEnclosingClassId = findEnclosingClassId(captureMap['call'], file.path, language);
             for (const item of routed.items) {
               const nodeId = generateId('Property', `${file.path}:${item.propName}`);
               graph.addNode({
@@ -575,6 +575,10 @@ export const processCalls = async (
           receiverTypeName = receiverName;
         }
       }
+      // `this` / `super`: TypeEnv often has no binding — use enclosing class/struct name for member resolution.
+      if (!receiverTypeName && receiverName && callForm === 'member' && (receiverName === 'this' || receiverName === 'super')) {
+        receiverTypeName = findEnclosingClassLikeTypeName(callNode, language);
+      }
       // Hoist sourceId so it's available for ACCESSES edge emission during chain walk.
       const enclosingFuncId = findEnclosingFunction(callNode, file.path, ctx, provider);
       const sourceId = enclosingFuncId || generateId('File', file.path);
@@ -587,27 +591,29 @@ export const processCalls = async (
         if (receiverNode) {
           const extracted = extractMixedChain(receiverNode);
           if (extracted && extracted.chain.length > 0) {
-            let currentType = extracted.baseReceiverName && typeEnv
-              ? typeEnv.lookup(extracted.baseReceiverName, callNode)
+            let seedType = extracted.baseReceiverName && typeEnv
+              ? typeEnv.lookup(extracted.baseReceiverName, callNode) ?? undefined
               : undefined;
-            if (!currentType && extracted.baseReceiverName && receiverIndex.size > 0) {
+            if (!seedType && extracted.baseReceiverName && receiverIndex.size > 0) {
               const funcName = enclosingFuncId ? extractFuncNameFromSourceId(enclosingFuncId) : '';
-              currentType = lookupReceiverType(receiverIndex, funcName, extracted.baseReceiverName);
+              seedType = lookupReceiverType(receiverIndex, funcName, extracted.baseReceiverName);
             }
-            if (!currentType && extracted.baseReceiverName) {
-              const cr = ctx.resolve(extracted.baseReceiverName, file.path);
-              if (cr?.candidates.some(d =>
-                d.type === 'Class' || d.type === 'Interface' || d.type === 'Struct' || d.type === 'Enum',
-              )) {
-                currentType = extracted.baseReceiverName;
-              }
-            }
-            if (currentType) {
-              receiverTypeName = walkMixedChain(
-                extracted.chain, currentType, file.path, ctx,
-                makeAccessEmitter(graph, sourceId),
-              );
-            }
+            receiverTypeName = resolveMixedChainReceiverType(
+              extracted.chain,
+              file.path,
+              ctx,
+              {
+                receiverName: extracted.baseReceiverName,
+                receiverTypeName: seedType,
+                enclosingClassType: (extracted.baseReceiverName === 'this' || extracted.baseReceiverName === 'super')
+                  ? findEnclosingClassLikeTypeName(callNode, language)
+                  : undefined,
+                sourceId,
+                receiverMap: receiverIndex.size > 0 ? receiverIndex : undefined,
+                onFieldResolved: makeAccessEmitter(graph, sourceId),
+                widenCache,
+              },
+            );
           }
         }
       }
@@ -1088,16 +1094,42 @@ const resolveFieldAccessType = (
   fieldName: string,
   filePath: string,
   ctx: ResolutionContext,
+  widenCache?: WidenCache,
 ): FieldResolution | undefined => {
   const fieldDef = resolveFieldOwnership(receiverName, fieldName, filePath, ctx);
-  if (!fieldDef?.declaredType) return undefined;
+  if (!fieldDef) return undefined;
+
+  let rawType = fieldDef.declaredType;
+  if (!rawType && fieldDef.initializerCallName) {
+    const resolvedInit = resolveCallTarget(
+      {
+        calledName: fieldDef.initializerCallName,
+        callForm: 'free',
+        argCount: undefined,
+        receiverName: undefined,
+        receiverTypeName: undefined,
+      },
+      filePath,
+      ctx,
+      undefined,
+      widenCache,
+    );
+    if (resolvedInit?.returnType) {
+      rawType = resolvedInit.returnType;
+    }
+  }
+  if (!rawType) return undefined;
 
   // Use stripNullable (not extractReturnTypeName) — field types like List<User>
-  // should be preserved as-is, not unwrapped to User. Only strip nullable wrappers.
-  return {
-    typeName: stripNullable(fieldDef.declaredType),
-    fieldNodeId: fieldDef.nodeId,
-  };
+  // should be preserved as-is, except when rawType came from a return-type string
+  // (then extractReturnTypeName normalises `: Foo` / generics).
+  const fromInit = Boolean(fieldDef.initializerCallName && !fieldDef.declaredType);
+  const typeName = fromInit
+    ? (extractReturnTypeName(rawType) ?? stripNullable(rawType))
+    : stripNullable(rawType);
+  if (!typeName) return undefined;
+
+  return { typeName, fieldNodeId: fieldDef.nodeId };
 };
 
 /**
@@ -1110,7 +1142,7 @@ const resolveFieldOwnership = (
   fieldName: string,
   filePath: string,
   ctx: ResolutionContext,
-): { nodeId: string; declaredType?: string } | undefined => {
+): { nodeId: string; declaredType?: string; initializerCallName?: string } | undefined => {
   const typeResolved = ctx.resolve(receiverName, filePath);
   if (!typeResolved) return undefined;
   const classDef = typeResolved.candidates.find(
@@ -1119,7 +1151,13 @@ const resolveFieldOwnership = (
   );
   if (!classDef) return undefined;
 
-  return ctx.symbols.lookupFieldByOwner(classDef.nodeId, fieldName) ?? undefined;
+  const def = ctx.symbols.lookupFieldByOwner(classDef.nodeId, fieldName);
+  if (!def) return undefined;
+  return {
+    nodeId: def.nodeId,
+    ...(def.declaredType !== undefined ? { declaredType: def.declaredType } : {}),
+    ...(def.initializerCallName !== undefined ? { initializerCallName: def.initializerCallName } : {}),
+  };
 };
 
 /**
@@ -1163,12 +1201,13 @@ const walkMixedChain = (
   filePath: string,
   ctx: ResolutionContext,
   onFieldResolved?: OnFieldResolved,
+  widenCache?: WidenCache,
 ): string | undefined => {
   let currentType: string | undefined = startType;
   for (const step of chain) {
     if (!currentType) break;
     if (step.kind === 'field') {
-      const resolved = resolveFieldAccessType(currentType, step.name, filePath, ctx);
+      const resolved = resolveFieldAccessType(currentType, step.name, filePath, ctx, widenCache);
       if (!resolved) { currentType = undefined; break; }
       onFieldResolved?.(resolved.fieldNodeId);
       currentType = resolved.typeName;
@@ -1176,7 +1215,7 @@ const walkMixedChain = (
       // Ruby/Python: property access is syntactically identical to method calls.
       // Try field resolution first — if the name is a known property with declaredType,
       // use that type directly. Otherwise fall back to method call resolution.
-      const fieldResolved = resolveFieldAccessType(currentType, step.name, filePath, ctx);
+      const fieldResolved = resolveFieldAccessType(currentType, step.name, filePath, ctx, widenCache);
       if (fieldResolved) {
         onFieldResolved?.(fieldResolved.fieldNodeId);
         currentType = fieldResolved.typeName;
@@ -1197,6 +1236,75 @@ const walkMixedChain = (
       if (!retType) { currentType = undefined; break; }
       currentType = retType;
     }
+  }
+  return currentType;
+};
+
+/** Options for {@link resolveMixedChainReceiverType}. */
+interface MixedChainReceiverResolveOptions {
+  receiverName?: string;
+  receiverTypeName?: string;
+  /** Enclosing class/struct simple name when receiverName is `this` or `super` */
+  enclosingClassType?: string;
+  sourceId: string;
+  receiverMap?: ReceiverTypeIndex;
+  onFieldResolved?: OnFieldResolved;
+  widenCache?: WidenCache;
+}
+
+/**
+ * Resolve the static type at the end of a receiver chain (fields + calls), including
+ * Cangjie-style `getSvc().method()` where the chain starts with free functions whose
+ * return types must be read from symbol metadata before member resolution.
+ */
+const resolveMixedChainReceiverType = (
+  chain: readonly MixedChainStep[],
+  filePath: string,
+  ctx: ResolutionContext,
+  options: MixedChainReceiverResolveOptions,
+): string | undefined => {
+  let currentType = options.receiverTypeName;
+  if (!currentType && options.receiverName && options.receiverMap) {
+    const funcName = extractFuncNameFromSourceId(options.sourceId);
+    currentType = lookupReceiverType(options.receiverMap, funcName, options.receiverName);
+  }
+  if (!currentType && options.receiverName) {
+    const cr = ctx.resolve(options.receiverName, filePath);
+    if (cr?.candidates.some(d =>
+      d.type === 'Class' || d.type === 'Interface' || d.type === 'Struct' || d.type === 'Enum',
+    )) {
+      currentType = options.receiverName;
+    }
+  }
+  if (!currentType && options.receiverName && (options.receiverName === 'this' || options.receiverName === 'super') && options.enclosingClassType) {
+    currentType = options.enclosingClassType;
+  }
+
+  let i = 0;
+  while (i < chain.length && chain[i].kind === 'call' && currentType === undefined) {
+    const resolved = resolveCallTarget(
+      {
+        calledName: chain[i].name,
+        callForm: 'free',
+        argCount: undefined,
+        receiverName: undefined,
+        receiverTypeName: undefined,
+      },
+      filePath,
+      ctx,
+      undefined,
+      options.widenCache,
+    );
+    if (!resolved?.returnType) break;
+    const next = extractReturnTypeName(resolved.returnType);
+    if (!next) break;
+    currentType = next;
+    i++;
+  }
+
+  if (!currentType) return undefined;
+  if (i < chain.length) {
+    return walkMixedChain(chain.slice(i), currentType, filePath, ctx, options.onFieldResolved, options.widenCache);
   }
   return currentType;
 };
@@ -1267,32 +1375,33 @@ export const processCallsFromExtracted = async (
         }
       }
 
+      // `this` / `super` without a mixed chain: seed receiver type from enclosing class/struct.
+      if (!effectiveCall.receiverTypeName && effectiveCall.callForm === 'member'
+        && (effectiveCall.receiverName === 'this' || effectiveCall.receiverName === 'super')
+        && effectiveCall.enclosingClassType
+        && !effectiveCall.receiverMixedChain?.length) {
+        effectiveCall = { ...effectiveCall, receiverTypeName: effectiveCall.enclosingClassType };
+      }
+
       // Step 1c: mixed chain resolution (field, call, or interleaved — e.g. svc.getUser().address.save()).
-      // Runs whenever receiverMixedChain is present. Steps 1/1b may have resolved the base receiver
-      // type already; that type is used as the chain's starting point.
+      // Also Cangjie `getSvc().method()` where the chain begins with free functions (return types from symbols).
       if (effectiveCall.receiverMixedChain?.length) {
-        // Use the already-resolved base type (from Steps 1/1b) or look it up now.
-        let currentType: string | undefined = effectiveCall.receiverTypeName;
-        if (!currentType && effectiveCall.receiverName && receiverMap) {
-          const callFuncName = extractFuncNameFromSourceId(effectiveCall.sourceId);
-          currentType = lookupReceiverType(receiverMap, callFuncName, effectiveCall.receiverName);
-        }
-        if (!currentType && effectiveCall.receiverName) {
-          const typeResolved = ctx.resolve(effectiveCall.receiverName, effectiveCall.filePath);
-          if (typeResolved?.candidates.some(d =>
-            d.type === 'Class' || d.type === 'Interface' || d.type === 'Struct' || d.type === 'Enum',
-          )) {
-            currentType = effectiveCall.receiverName;
-          }
-        }
-        if (currentType) {
-          const walkedType = walkMixedChain(
-            effectiveCall.receiverMixedChain, currentType, effectiveCall.filePath, ctx,
-            makeAccessEmitter(graph, effectiveCall.sourceId),
-          );
-          if (walkedType) {
-            effectiveCall = { ...effectiveCall, receiverTypeName: walkedType };
-          }
+        const walkedType = resolveMixedChainReceiverType(
+          effectiveCall.receiverMixedChain,
+          effectiveCall.filePath,
+          ctx,
+          {
+            receiverName: effectiveCall.receiverName,
+            receiverTypeName: effectiveCall.receiverTypeName,
+            enclosingClassType: effectiveCall.enclosingClassType,
+            sourceId: effectiveCall.sourceId,
+            receiverMap,
+            onFieldResolved: makeAccessEmitter(graph, effectiveCall.sourceId),
+            widenCache,
+          },
+        );
+        if (walkedType) {
+          effectiveCall = { ...effectiveCall, receiverTypeName: walkedType };
         }
       }
 

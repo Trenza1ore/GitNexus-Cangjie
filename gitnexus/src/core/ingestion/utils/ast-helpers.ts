@@ -2,6 +2,7 @@ import type Parser from 'tree-sitter';
 import type { NodeLabel } from '../../graph/types.js';
 import type { LanguageProvider } from '../language-provider.js';
 import { generateId } from '../../../lib/utils.js';
+import { SupportedLanguages } from '../../../config/supported-languages.js';
 import { extractSimpleTypeName } from '../type-extractors/shared.js';
 
 /** Tree-sitter AST node. Re-exported for use across ingestion modules. */
@@ -210,7 +211,150 @@ export function getLabelFromCaptures(
 
 /** Walk up AST to find enclosing class/struct/interface/impl, return its generateId or null.
  *  For Go method_declaration nodes, extracts receiver type (e.g. `func (u *User) Save()` → User struct). */
-export const findEnclosingClassId = (node: any, filePath: string): string | null => {
+/**
+ * Simple type name of the enclosing class/struct/interface for `this` / `super` call resolution.
+ * Returns e.g. `ContactsDataProvider` (not a graph node id).
+ */
+export const findEnclosingClassLikeTypeName = (
+  node: SyntaxNode | null | undefined,
+  language?: SupportedLanguages,
+): string | undefined => {
+  let current: SyntaxNode | null | undefined = node?.parent ?? null;
+  while (current) {
+    if (current.type === 'classDefinition') {
+      const cn = current.namedChildren?.find(c => c.type === 'className');
+      if (cn?.text) return cn.text;
+    }
+    if (current.type === 'structDefinition') {
+      const sn = current.namedChildren?.find(c => c.type === 'structName');
+      if (sn?.text) return sn.text;
+    }
+    if (current.type === 'interfaceDefinition') {
+      const n = current.namedChildren?.find(c => c.type === 'interfaceName');
+      if (n?.text) return n.text;
+    }
+    if (current.type === 'enumDefinition') {
+      const n = current.namedChildren?.find(c => c.type === 'enumName');
+      if (n?.text) return n.text;
+    }
+    current = current.parent;
+  }
+  if (language === SupportedLanguages.Cangjie) {
+    let n: SyntaxNode | null | undefined = node;
+    while (n) {
+      if ((n.type === 'functionDefinition' || n.type === 'operatorFunctionDefinition')
+        && n.parent?.type === 'translationUnit') {
+        const owner = findCangjieTuLevelMemberOwningClass(n);
+        const name = cangjieTypeContainerSimpleName(owner);
+        if (name) return name;
+        break;
+      }
+      n = n.parent;
+    }
+  }
+  return undefined;
+};
+
+/** Cangjie: `private let x = getFoo()` → `getFoo` (single identifier + call suffix only). */
+export const extractCangjieVariableInitializerCallName = (node: SyntaxNode | null | undefined): string | undefined => {
+  if (!node || node.type !== 'variableDeclaration') return undefined;
+  const named = node.namedChildren.filter(c => c.type !== 'comment');
+  const postfix = named.find(c => c.type === 'postfixExpression');
+  if (!postfix) return undefined;
+  const pn = postfix.namedChildren.filter(c => c.type !== 'comment');
+  if (pn.length !== 2 || pn[1].type !== 'callSuffix') return undefined;
+  const callee = pn[0];
+  if (callee.type === 'atomicVariable' || callee.type === 'identifier') return callee.text;
+  return undefined;
+};
+
+/** Cangjie: `private var x: SomeType = ...` — explicit `userType` (FieldExtractor skips Const). */
+export const extractCangjieVariableDeclaredType = (node: SyntaxNode | null | undefined): string | undefined => {
+  if (!node || node.type !== 'variableDeclaration') return undefined;
+  const ut = node.namedChildren.find(c => c.type === 'userType');
+  const raw = ut?.text?.trim();
+  return raw || undefined;
+};
+
+const CANGJIE_TU_MEMBER_NODE_TYPES = new Set([
+  'functionDefinition',
+  'operatorFunctionDefinition',
+  'variableDeclaration',
+]);
+
+/**
+ * True if an ERROR (or subtree with errors) sits between two byte offsets in TU children.
+ * Used to avoid treating normal `public func foo()` after a *closed* class as a class member.
+ */
+const cangjieTuHasErrorBetween = (tu: SyntaxNode, afterStartIndex: number, beforeStartIndex: number): boolean => {
+  for (let i = 0; i < tu.namedChildCount; i++) {
+    const c = tu.namedChild(i);
+    if (c.startIndex <= afterStartIndex) continue;
+    if (c.startIndex >= beforeStartIndex) break;
+    if (c.type === 'ERROR' || c.hasError) return true;
+  }
+  return false;
+};
+
+/**
+ * When tree-sitter-cangjie error-recovery splits a class (e.g. `@Observed` / macro-heavy files),
+ * members may appear as direct `translationUnit` children. Returns the last class/struct/interface
+ * before `memberNode` only if an ERROR node lies between that type and the member (recovery gap);
+ * otherwise returns null so file-level factories after a well-formed class stay `Function`.
+ */
+export const findCangjieTuLevelMemberOwningClass = (memberNode: SyntaxNode | null | undefined): SyntaxNode | null => {
+  if (!memberNode) return null;
+  const p = memberNode.parent;
+  if (!p || p.type !== 'translationUnit') return null;
+  if (!CANGJIE_TU_MEMBER_NODE_TYPES.has(memberNode.type)) return null;
+  let last: SyntaxNode | null = null;
+  for (let i = 0; i < p.namedChildCount; i++) {
+    const c = p.namedChild(i);
+    if (c.startIndex >= memberNode.startIndex) break;
+    if (c.type === 'classDefinition' || c.type === 'structDefinition' || c.type === 'interfaceDefinition') {
+      last = c;
+    }
+  }
+  if (!last) return null;
+  if (!cangjieTuHasErrorBetween(p, last.startIndex, memberNode.startIndex)) return null;
+  return last;
+};
+
+const cangjieTypeContainerSimpleName = (owner: SyntaxNode | null | undefined): string | undefined => {
+  if (!owner) return undefined;
+  if (owner.type === 'classDefinition') {
+    const cn = owner.namedChildren?.find(c => c.type === 'className');
+    return cn?.text;
+  }
+  if (owner.type === 'structDefinition') {
+    const n = owner.namedChildren?.find(c => c.type === 'structName');
+    return n?.text;
+  }
+  if (owner.type === 'interfaceDefinition') {
+    const n = owner.namedChildren?.find(c => c.type === 'interfaceName');
+    return n?.text;
+  }
+  return undefined;
+};
+
+const cangjieTypeContainerGraphId = (owner: SyntaxNode | null | undefined, filePath: string): string | null => {
+  if (!owner) return null;
+  if (owner.type === 'classDefinition') {
+    const cn = owner.namedChildren?.find((c: any) => c.type === 'className');
+    return cn?.text ? generateId('Class', `${filePath}:${cn.text}`) : null;
+  }
+  if (owner.type === 'interfaceDefinition') {
+    const n = owner.namedChildren?.find((c: any) => c.type === 'interfaceName');
+    return n?.text ? generateId('Interface', `${filePath}:${n.text}`) : null;
+  }
+  if (owner.type === 'structDefinition') {
+    const n = owner.namedChildren?.find((c: any) => c.type === 'structName');
+    return n?.text ? generateId('Struct', `${filePath}:${n.text}`) : null;
+  }
+  return null;
+};
+
+export const findEnclosingClassId = (node: any, filePath: string, language?: SupportedLanguages): string | null => {
   let current = node.parent;
   while (current) {
     // Cangjie: camelCase containers use *Name children
@@ -298,6 +442,18 @@ export const findEnclosingClassId = (node: any, filePath: string): string | null
     }
     current = current.parent;
   }
+  if (language === SupportedLanguages.Cangjie) {
+    let n: any = node;
+    while (n) {
+      if (CANGJIE_TU_MEMBER_NODE_TYPES.has(n.type) && n.parent?.type === 'translationUnit') {
+        const owner = findCangjieTuLevelMemberOwningClass(n);
+        const id = cangjieTypeContainerGraphId(owner, filePath);
+        if (id) return id;
+        break;
+      }
+      n = n.parent;
+    }
+  }
   return null;
 };
 
@@ -350,6 +506,9 @@ export const extractFunctionName = (node: SyntaxNode): { funcName: string | null
         break;
       }
       a = a.parent;
+    }
+    if (!insideMember && node.parent?.type === 'translationUnit' && findCangjieTuLevelMemberOwningClass(node)) {
+      insideMember = true;
     }
     const memberLabel: NodeLabel = insideMember ? 'Method' : 'Function';
     for (let i = 0; i < node.namedChildCount; i++) {
@@ -789,9 +948,19 @@ export const extractMethodSignature = (node: SyntaxNode | null | undefined): Met
     }
   }
 
-  // Cangjie: returnType field on functionDefinition / init / operatorFunctionDefinition
+  // Cangjie: return type is a `returnType` child on functionDefinition / init / operatorFunctionDefinition.
+  // Some grammar builds expose it only as a named child (not `childForFieldName('returnType')`).
   if (!returnType) {
-    const cjReturn = node.childForFieldName?.('returnType');
+    let cjReturn = node.childForFieldName?.('returnType');
+    if (!cjReturn) {
+      for (let i = 0; i < node.namedChildCount; i++) {
+        const c = node.namedChild(i);
+        if (c?.type === 'returnType') {
+          cjReturn = c;
+          break;
+        }
+      }
+    }
     if (cjReturn && cjReturn.text && cjReturn.text !== 'Unit') {
       returnType = cjReturn.text;
     }

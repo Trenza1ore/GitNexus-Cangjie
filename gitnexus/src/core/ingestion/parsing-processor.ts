@@ -7,7 +7,8 @@ import { SymbolTable } from './symbol-table.js';
 import { ASTCache } from './ast-cache.js';
 import { getLanguageFromFilename } from './utils/language-detection.js';
 import { yieldToEventLoop } from './utils/event-loop.js';
-import { getDefinitionNodeFromCaptures, findEnclosingClassId, extractMethodSignature, getLabelFromCaptures, CLASS_CONTAINER_TYPES, type SyntaxNode } from './utils/ast-helpers.js';
+import { getDefinitionNodeFromCaptures, findEnclosingClassId, extractMethodSignature, extractCangjieVariableInitializerCallName, extractCangjieVariableDeclaredType, getLabelFromCaptures, CLASS_CONTAINER_TYPES, type SyntaxNode } from './utils/ast-helpers.js';
+import { SupportedLanguages } from '../../config/supported-languages.js';
 import { detectFrameworkFromAST } from './framework-detection.js';
 import { buildTypeEnv } from './type-env.js';
 import type { FieldInfo, FieldExtractorContext } from './field-types.js';
@@ -96,6 +97,7 @@ const processParsingWithWorkers = async (
         returnType: sym.returnType,
         declaredType: sym.declaredType,
         ownerId: sym.ownerId,
+        ...(sym.initializerCallName !== undefined ? { initializerCallName: sym.initializerCallName } : {}),
       });
     }
 
@@ -140,10 +142,10 @@ const processParsingWithWorkers = async (
 const classIdCache = new Map<any, string | null>();
 const exportCache = new Map<any, boolean>();
 
-const cachedFindEnclosingClassId = (node: any, filePath: string): string | null => {
+const cachedFindEnclosingClassId = (node: any, filePath: string, lang: SupportedLanguages): string | null => {
   const cached = classIdCache.get(node);
   if (cached !== undefined) return cached;
-  const result = findEnclosingClassId(node, filePath);
+  const result = findEnclosingClassId(node, filePath, lang);
   classIdCache.set(node, result);
   return result;
 };
@@ -309,6 +311,18 @@ const processParsingSequential = async (
         }
       }
 
+      let seqInitializerCallName: string | undefined;
+      let seqCangjieConstDeclaredType: string | undefined;
+      if (nodeLabel === 'Const' && definitionNode?.type === 'variableDeclaration' && language === SupportedLanguages.Cangjie) {
+        seqInitializerCallName = extractCangjieVariableInitializerCallName(definitionNode);
+        seqCangjieConstDeclaredType = extractCangjieVariableDeclaredType(definitionNode);
+      }
+
+      // Compute enclosing class for Method/Constructor/Property/Function/Const — ownerId + HAS_* (Const = Cangjie `private let` fields)
+      // Function is included because Kotlin/Rust/Python capture class methods as Function nodes
+      const needsOwner = nodeLabel === 'Method' || nodeLabel === 'Constructor' || nodeLabel === 'Property' || nodeLabel === 'Function' || nodeLabel === 'Const';
+      const enclosingClassId = needsOwner ? cachedFindEnclosingClassId(nameNode || definitionNodeForRange, file.path, language) : null;
+
       const node: GraphNode = {
         id: nodeId,
         label: nodeLabel as any,
@@ -329,15 +343,11 @@ const processParsingSequential = async (
             ...(methodSig.parameterTypes ? { parameterTypes: methodSig.parameterTypes } : {}),
             returnType: methodSig.returnType,
           } : {}),
+          ...(seqInitializerCallName !== undefined ? { initializerCallName: seqInitializerCallName } : {}),
         },
       };
 
       graph.addNode(node);
-
-      // Compute enclosing class for Method/Constructor/Property/Function — used for both ownerId and HAS_METHOD
-      // Function is included because Kotlin/Rust/Python capture class methods as Function nodes
-      const needsOwner = nodeLabel === 'Method' || nodeLabel === 'Constructor' || nodeLabel === 'Property' || nodeLabel === 'Function';
-      const enclosingClassId = needsOwner ? cachedFindEnclosingClassId(nameNode || definitionNodeForRange, file.path) : null;
 
       // Extract declared type and field metadata for Property nodes
       let declaredType: string | undefined;
@@ -364,6 +374,10 @@ const processParsingSequential = async (
         // All 14 languages register a FieldExtractor — no fallback needed.
       }
 
+      if (declaredType === undefined && seqCangjieConstDeclaredType) {
+        declaredType = seqCangjieConstDeclaredType;
+      }
+
       // Apply field metadata to the graph node retroactively
       if (seqVisibility !== undefined) node.properties.visibility = seqVisibility;
       if (seqIsStatic !== undefined) node.properties.isStatic = seqIsStatic;
@@ -377,6 +391,7 @@ const processParsingSequential = async (
         returnType: methodSig?.returnType,
         declaredType,
         ownerId: enclosingClassId ?? undefined,
+        ...(seqInitializerCallName !== undefined ? { initializerCallName: seqInitializerCallName } : {}),
       });
 
       const fileId = generateId('File', file.path);
@@ -396,7 +411,7 @@ const processParsingSequential = async (
 
       // ── HAS_METHOD / HAS_PROPERTY: link member to enclosing class ──
       if (enclosingClassId) {
-        const memberEdgeType = nodeLabel === 'Property' ? 'HAS_PROPERTY' : 'HAS_METHOD';
+        const memberEdgeType = (nodeLabel === 'Property' || nodeLabel === 'Const') ? 'HAS_PROPERTY' : 'HAS_METHOD';
         graph.addRelationship({
           id: generateId(memberEdgeType, `${enclosingClassId}->${nodeId}`),
           sourceId: enclosingClassId,

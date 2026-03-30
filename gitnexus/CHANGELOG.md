@@ -2,6 +2,33 @@
 
 All notable changes to GitNexus will be documented in this file.
 
+## [1.4.10-cj.post7] - 2026-03-27
+
+### Analysis (Cangjie call graph)
+
+- **Postfix chains** — Cangjie encodes many calls as nested `postfixExpression` + `callSuffix`, not generic `call_expression`. Free factory calls in a receiver chain (`getSvc().method()`) need return types from the symbol table before member resolution.
+- **`this.field.method()`** — Receiver type for the final member call requires the field’s type. Class fields are often `private let x = factory()` or `private var x: T = factory()` with no `Property` + FieldExtractor path: use **`initializerCallName`** on `Const` and/or **`declaredType`** from AST `userType`, plus **`ownerId`** / `fieldByOwner` so `lookupFieldByOwner` succeeds.
+- **Imports** — Grammar exposes `importList` children as `subGroupOfPackage` / `packageFull` / `scoped_identifier`, not `packageName`; selective imports `pkg.{a, b}` must be normalized to `pkg` for package-dir matching. Wildcard `pkg.*` uses `packageFull`.
+- **Worker merge gap** — Parse workers emitted `initializerCallName` on symbols, but **`parsing-processor`** merged symbols into `SymbolTable` without forwarding that field, so field type inference silently failed for worker-based indexing.
+- **Macro / error recovery** — With `@Observed` (and similar), the Cangjie tree often has **`ERROR`** after `classDefinition` and hoists **methods and fields to `translationUnit`**. Parent walks never reach `classBody`, so methods were labeled **`Function`**, `findEnclosingClassLikeTypeName` could not resolve **`this`**, and **`this.service.*`** collapsed to same-file self-calls. A **TU-level member** heuristic must apply only when an **`ERROR` node lies between** the preceding type container and the member; otherwise legitimate file-level functions after a closed class (e.g. `getCore(): Core`) are misclassified as methods.
+
+### Fixed
+
+- **Cangjie factory + member chains** — Extract postfix call chains in `call-analysis`, walk mixed receivers in `call-processor` (`resolveMixedChainReceiverType`, `widenCache`), normalize return-type strings (`type-extractors/shared`, `ast-helpers` signature / returnType fallback).
+- **Cangjie `this` / `this.field.*`** — `enclosingClassType` on extracted calls, seed receiver type for `this`/`super`, field resolution via `initializerCallName` + `resolveCallTarget`, `walkMixedChain` passes `widenCache`.
+- **Cangjie imports** — Query captures for `subGroupOfPackage`, `packageFull`, `scoped_identifier`; `importPathPreprocessor` strips `.{…}` selective lists to the package prefix for resolution.
+- **Symbol table** — `Const` / `Variable` with `ownerId` in `fieldByOwner`; **`parsing-processor`** forwards **`initializerCallName`** when merging worker symbols; sequential parse path aligns (`Const` → `HAS_PROPERTY`, Cangjie `userType` → `declaredType`).
+- **Cangjie Method vs Function (recovery)** — `findCangjieTuLevelMemberOwningClass` (ERROR-gated), `findEnclosingClassId` / `findEnclosingClassLikeTypeName` optional language + Cangjie TU fallback, `extractFunctionName` + `labelOverride` return **`Method`**; removed duplicate **`@definition.method`** query patterns to avoid double matches.
+- **Call processor / workers** — Pass **`SupportedLanguages`** into enclosing-class helpers where the Cangjie fallback is needed.
+
+### Added
+
+- **Fixtures & tests** — `cangjie-factory-call`, `cangjie-this-field-member` (incl. typed `private var` provider), `cangjie-brace-import`; integration tests under `test/integration/resolvers/`; extra unit coverage in `call-form` / `call-processor` where applicable.
+
+### Changed files (gitnexus package)
+
+`call-processor.ts`, `languages/cangjie.ts`, `parsing-processor.ts`, `symbol-table.ts`, `tree-sitter-queries.ts`, `type-extractors/shared.ts`, `utils/ast-helpers.ts`, `utils/call-analysis.ts`, `workers/parse-worker.ts`, `package.json`, `test/unit/call-form.test.ts`, `test/unit/call-processor.test.ts`, plus new fixtures/tests listed above.
+
 ## [1.4.10-cj] - 2026-03-27
 
 ### Added

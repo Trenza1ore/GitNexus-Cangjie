@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { inferCallForm, extractReceiverName } from '../../src/core/ingestion/utils/call-analysis.js';
+import { inferCallForm, extractReceiverName, extractMixedChain, extractReceiverNode } from '../../src/core/ingestion/utils/call-analysis.js';
 import type { SyntaxNode } from '../../src/core/ingestion/utils/ast-helpers.js';
 import { createSymbolTable } from '../../src/core/ingestion/symbol-table.js';
 import Parser from 'tree-sitter';
@@ -14,6 +14,7 @@ import CPP from 'tree-sitter-cpp';
 import PHP from 'tree-sitter-php';
 import { SupportedLanguages } from '../../src/config/supported-languages.js';
 import { getProvider } from '../../src/core/ingestion/languages/index.js';
+import cangjie from 'tree-sitter-cangjie';
 
 /**
  * Helper: parse code, run the language query, and return all @call captures
@@ -418,6 +419,41 @@ describe('extractReceiverName', () => {
       const match = captures.find(c => c.calledName === 'save');
       expect(match).toBeDefined();
       expect(extractReceiverName(match!.nameNode)).toBe('user');
+    });
+  });
+
+  describe('Cangjie', () => {
+    it('extractMixedChain records factory call before member (getSvc().parseFlags)', () => {
+      parser.setLanguage(cangjie);
+      const code = `package p
+public class A {
+  public func m(x: Int32): Int32 { return getSvc().parseFlags(x) }
+}`;
+      const captures = extractCallCaptures(parser, code, SupportedLanguages.Cangjie);
+      const match = captures.find(c => c.calledName === 'parseFlags');
+      expect(match).toBeDefined();
+      const receiverNode = extractReceiverNode(match!.nameNode);
+      expect(receiverNode?.type).toBe('postfixExpression');
+      expect(extractMixedChain(receiverNode!)).toEqual({
+        chain: [{ kind: 'call', name: 'getSvc' }],
+        baseReceiverName: undefined,
+      });
+    });
+
+    it('extractMixedChain records svc.getUser before save()', () => {
+      parser.setLanguage(cangjie);
+      const code = `package p
+public class X {
+  public func save(svc: S): Int32 { return svc.getUser().save() }
+}`;
+      const captures = extractCallCaptures(parser, code, SupportedLanguages.Cangjie);
+      const match = captures.find(c => c.calledName === 'save');
+      expect(match).toBeDefined();
+      const receiverNode = extractReceiverNode(match!.nameNode);
+      expect(extractMixedChain(receiverNode!)).toEqual({
+        chain: [{ kind: 'call', name: 'getUser' }],
+        baseReceiverName: 'svc',
+      });
     });
   });
 });

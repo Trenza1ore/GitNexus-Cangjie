@@ -155,6 +155,44 @@ describe('processCallsFromExtracted', () => {
     expect(rels[0].reason).toBe('same-file');
   });
 
+  it('resolves member after package-scoped factory via receiverMixedChain (Cangjie-style)', async () => {
+    const classCore = 'Class:svc/Core.cj:Core';
+    const methodParseSvc = 'Method:svc/Core.cj:parse';
+    const methodParseAdapter = 'Method:client/Adapter.cj:parse';
+    const fnGetCore = 'Function:svc/Core.cj:getCore';
+
+    ctx.symbols.add('svc/Core.cj', 'Core', classCore, 'Class');
+    ctx.symbols.add('svc/Core.cj', 'getCore', fnGetCore, 'Function', { returnType: ': Core' });
+    ctx.symbols.add('svc/Core.cj', 'parse', methodParseSvc, 'Method', {
+      ownerId: classCore,
+      returnType: ': Int32',
+      parameterCount: 0,
+    });
+    ctx.symbols.add('client/Adapter.cj', 'Adapter', 'Class:client/Adapter.cj:Adapter', 'Class');
+    ctx.symbols.add('client/Adapter.cj', 'parse', methodParseAdapter, 'Method', {
+      ownerId: 'Class:client/Adapter.cj:Adapter',
+      returnType: ': Int32',
+      parameterCount: 0,
+    });
+    ctx.packageMap.set('client/Adapter.cj', new Set(['/svc/']));
+
+    const calls: ExtractedCall[] = [{
+      filePath: 'client/Adapter.cj',
+      calledName: 'parse',
+      sourceId: 'Method:client/Adapter.cj:viaFactory',
+      callForm: 'member',
+      argCount: 0,
+      receiverMixedChain: [{ kind: 'call', name: 'getCore' }],
+    }];
+
+    await processCallsFromExtracted(graph, calls, ctx);
+
+    const rels = graph.relationships.filter(r => r.type === 'CALLS');
+    expect(rels).toHaveLength(1);
+    expect(rels[0].targetId).toBe(methodParseSvc);
+    expect(rels[0].targetId).not.toBe(methodParseAdapter);
+  });
+
   it('handles multiple calls from the same file', async () => {
     ctx.symbols.add('src/index.ts', 'foo', 'Function:src/index.ts:foo', 'Function');
     ctx.symbols.add('src/index.ts', 'bar', 'Function:src/index.ts:bar', 'Function');

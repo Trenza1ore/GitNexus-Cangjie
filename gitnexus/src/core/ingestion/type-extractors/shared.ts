@@ -701,6 +701,9 @@ export const extractReturnTypeName = (raw: string, depth = 0): string | undefine
   let text = raw.trim();
   if (!text) return undefined;
 
+  // Cangjie (and some grammars) store return types as ": TypeName" from the returnType node
+  text = text.replace(/^\s*:\s*/, '');
+
   // Strip pointer/reference prefixes: *User, &User, &mut User
   text = text.replace(/^[&*]+\s*(mut\s+)?/, '');
 

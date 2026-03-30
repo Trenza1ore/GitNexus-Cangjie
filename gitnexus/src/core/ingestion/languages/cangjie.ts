@@ -3,9 +3,16 @@
  */
 
 import type { SyntaxNode } from '../utils/ast-helpers.js';
+import { findCangjieTuLevelMemberOwningClass } from '../utils/ast-helpers.js';
 import { SupportedLanguages } from '../../../config/supported-languages.js';
 import { defineLanguage } from '../language-provider.js';
 import type { LanguageProvider } from '../language-provider.js';
+
+/** `import pkg.sub.{A, B}` → `pkg.sub` so package dir resolution matches on-disk layout. */
+export const preprocessCangjieImportPath = (cleaned: string, _importNode: SyntaxNode): string => {
+  const m = cleaned.match(/^(.*)\.\{[^}]*\}$/);
+  return m ? m[1] : cleaned;
+};
 import { typeConfig as cangjieConfig } from '../type-extractors/cangjie.js';
 import { cangjieExportChecker } from '../export-detection.js';
 import { resolveCangjieImport } from '../import-resolvers/cangjie.js';
@@ -29,12 +36,13 @@ export function isCangjieMemberFunctionDefinition(functionNode: SyntaxNode | nul
     if (CJ_MEMBER_BODIES.has(ancestor.type)) return true;
     ancestor = ancestor.parent;
   }
-  return false;
+  return findCangjieTuLevelMemberOwningClass(functionNode) !== null;
 }
 
+/** Reclassify members as Method (Kotlin-style). Duplicate `@definition.method` query patterns were removed — single `@definition.function` match only. */
 const cangjieLabelOverride: NonNullable<LanguageProvider['labelOverride']> = (functionNode, defaultLabel) => {
   if (defaultLabel !== 'Function') return defaultLabel;
-  return isCangjieMemberFunctionDefinition(functionNode) ? null : defaultLabel;
+  return isCangjieMemberFunctionDefinition(functionNode) ? 'Method' : defaultLabel;
 };
 
 export const cangjieProvider = defineLanguage({
@@ -44,6 +52,7 @@ export const cangjieProvider = defineLanguage({
   typeConfig: cangjieConfig,
   exportChecker: cangjieExportChecker,
   importResolver: resolveCangjieImport,
+  importPathPreprocessor: preprocessCangjieImportPath,
   importSemantics: 'wildcard',
   labelOverride: cangjieLabelOverride,
 });

@@ -1153,21 +1153,9 @@ export const CANGJIE_QUERIES = `
 (interfaceDefinition (interfaceName) @name) @definition.interface
 (structDefinition (structName) @name) @definition.struct
 (enumDefinition (enumName) @name) @definition.enum
-; Free functions / operators (members use @definition.method patterns below — labelOverride skips duplicate @definition.function)
+; Free functions / operators. Class members use the same patterns; cangjieLabelOverride promotes to Method (avoids duplicate matches vs @definition.method).
 (functionDefinition (funcName) @name) @definition.function
 (operatorFunctionDefinition (operator) @name) @definition.function
-
-; Type members — same AST node as top-level func, distinct graph role (HAS_METHOD / Method)
-(classBody (functionDefinition (funcName) @name) @definition.method)
-(classBody (operatorFunctionDefinition (operator) @name) @definition.method)
-(structBody (functionDefinition (funcName) @name) @definition.method)
-(structBody (operatorFunctionDefinition (operator) @name) @definition.method)
-(interfaceBody (functionDefinition (funcName) @name) @definition.method)
-(interfaceBody (operatorFunctionDefinition (operator) @name) @definition.method)
-(extendBody (functionDefinition (funcName) @name) @definition.method)
-(extendBody (operatorFunctionDefinition (operator) @name) @definition.method)
-(enumBody (functionDefinition (funcName) @name) @definition.method)
-(enumBody (operatorFunctionDefinition (operator) @name) @definition.method)
 
 (macroDefinition (macroName) @name) @definition.macro
 (typeAlias (typeAliasName) @name) @definition.type
@@ -1175,8 +1163,10 @@ export const CANGJIE_QUERIES = `
 (variableDeclaration (variableName) @name) @definition.const
 (init) @definition.constructor
 
-(importList
-  packageName: (_) @import.source) @import
+; Cangjie import shapes (grammar uses subGroupOfPackage / packageFull / scoped_identifier — not packageName)
+(importList (subGroupOfPackage) @import.source) @import
+(importList (packageFull) @import.source) @import
+(importList (scoped_identifier) @import.source) @import
 
 ; Calls: foo() and obj.method() via postfixExpression + callSuffix
 (postfixExpression

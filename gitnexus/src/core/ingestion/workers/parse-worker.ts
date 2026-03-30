@@ -35,6 +35,9 @@ import {
   extractFunctionName,
   getDefinitionNodeFromCaptures,
   findEnclosingClassId,
+  findEnclosingClassLikeTypeName,
+  extractCangjieVariableInitializerCallName,
+  extractCangjieVariableDeclaredType,
   getLabelFromCaptures,
   extractMethodSignature,
   findDescendant,
@@ -107,6 +110,8 @@ interface ParsedSymbol {
   returnType?: string;
   declaredType?: string;
   ownerId?: string;
+  /** Cangjie: `private let x = foo()` — used for field type inference at call sites */
+  initializerCallName?: string;
   visibility?: string;
   isStatic?: boolean;
   isReadonly?: boolean;
@@ -141,6 +146,8 @@ export interface ExtractedCall {
    * Length is capped at MAX_CHAIN_DEPTH (3).
    */
   receiverMixedChain?: MixedChainStep[];
+  /** When receiverName is `this`/`super`, the enclosing class/struct simple name for member resolution */
+  enclosingClassType?: string;
 }
 
 export interface ExtractedAssignment {
@@ -414,11 +421,11 @@ const findEnclosingFunctionId = (node: any, filePath: string, provider: Language
 };
 
 /** Cached wrapper for findEnclosingClassId — avoids repeated parent walks. */
-const cachedFindEnclosingClassId = (node: any, filePath: string): string | null => {
+const cachedFindEnclosingClassId = (node: any, filePath: string, lang: SupportedLanguages): string | null => {
   const cached = classIdCache.get(node);
   if (cached !== undefined) return cached;
 
-  const result = findEnclosingClassId(node, filePath);
+  const result = findEnclosingClassId(node, filePath, lang);
   classIdCache.set(node, result);
   return result;
 };
@@ -1220,7 +1227,7 @@ const processFileGroup = (
             }
 
             if (routed.kind === 'properties') {
-              const propEnclosingClassId = cachedFindEnclosingClassId(captureMap['call'], file.path);
+              const propEnclosingClassId = cachedFindEnclosingClassId(captureMap['call'], file.path, language);
               // Enrich routed properties with FieldExtractor metadata
               let routedFieldMap: Map<string, FieldInfo> | undefined;
               if (provider.fieldExtractor && typeEnv) {
@@ -1317,6 +1324,11 @@ const processFileGroup = (
               }
             }
 
+            let enclosingClassType: string | undefined;
+            if (callForm === 'member' && receiverName && (receiverName === 'this' || receiverName === 'super')) {
+              enclosingClassType = findEnclosingClassLikeTypeName(callNameNode, language);
+            }
+
             result.calls.push({
               filePath: file.path,
               calledName,
@@ -1326,6 +1338,7 @@ const processFileGroup = (
               ...(receiverName !== undefined ? { receiverName } : {}),
               ...(receiverTypeName !== undefined ? { receiverTypeName } : {}),
               ...(receiverMixedChain !== undefined ? { receiverMixedChain } : {}),
+              ...(enclosingClassType !== undefined ? { enclosingClassType } : {}),
             });
           }
         }
@@ -1462,6 +1475,19 @@ const processFileGroup = (
         }
       }
 
+      // Compute enclosing class for Method/Constructor/Property/Function/Const — used for ownerId and HAS_*
+      const needsOwner = nodeLabel === 'Method' || nodeLabel === 'Constructor' || nodeLabel === 'Property' || nodeLabel === 'Function' || nodeLabel === 'Const';
+      const enclosingClassId = needsOwner ? cachedFindEnclosingClassId(nameNode || definitionNode, file.path, language) : null;
+
+      let initializerCallName: string | undefined;
+      if (nodeLabel === 'Const' && definitionNode?.type === 'variableDeclaration' && language === SupportedLanguages.Cangjie) {
+        initializerCallName = extractCangjieVariableInitializerCallName(definitionNode);
+        if (!declaredType) {
+          const cjT = extractCangjieVariableDeclaredType(definitionNode);
+          if (cjT) declaredType = cjT;
+        }
+      }
+
       result.nodes.push({
         id: nodeId,
         label: nodeLabel,
@@ -1485,13 +1511,9 @@ const processFileGroup = (
           ...(visibility !== undefined ? { visibility } : {}),
           ...(isStatic !== undefined ? { isStatic } : {}),
           ...(isReadonly !== undefined ? { isReadonly } : {}),
+          ...(initializerCallName !== undefined ? { initializerCallName } : {}),
         },
       });
-
-      // Compute enclosing class for Method/Constructor/Property/Function — used for both ownerId and HAS_METHOD
-      // Function is included because Kotlin/Rust/Python capture class methods as Function nodes
-      const needsOwner = nodeLabel === 'Method' || nodeLabel === 'Constructor' || nodeLabel === 'Property' || nodeLabel === 'Function';
-      const enclosingClassId = needsOwner ? cachedFindEnclosingClassId(nameNode || definitionNode, file.path) : null;
 
       result.symbols.push({
         filePath: file.path,
@@ -1507,6 +1529,7 @@ const processFileGroup = (
         ...(visibility !== undefined ? { visibility } : {}),
         ...(isStatic !== undefined ? { isStatic } : {}),
         ...(isReadonly !== undefined ? { isReadonly } : {}),
+        ...(initializerCallName !== undefined ? { initializerCallName } : {}),
       });
 
       const fileId = generateId('File', file.path);
@@ -1522,7 +1545,7 @@ const processFileGroup = (
 
       // ── HAS_METHOD / HAS_PROPERTY: link member to enclosing class ──
       if (enclosingClassId) {
-        const memberEdgeType = nodeLabel === 'Property' ? 'HAS_PROPERTY' : 'HAS_METHOD';
+        const memberEdgeType = (nodeLabel === 'Property' || nodeLabel === 'Const') ? 'HAS_PROPERTY' : 'HAS_METHOD';
         result.relationships.push({
           id: generateId(memberEdgeType, `${enclosingClassId}->${nodeId}`),
           sourceId: enclosingClassId,

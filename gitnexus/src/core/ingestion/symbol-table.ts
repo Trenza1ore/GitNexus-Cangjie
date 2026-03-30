@@ -18,6 +18,8 @@ export interface SymbolDefinition {
   declaredType?: string;
   /** Links Method/Constructor/Property to owning Class/Struct/Trait nodeId */
   ownerId?: string;
+  /** Cangjie: `private let x = foo()` — callee name for lazy field type inference */
+  initializerCallName?: string;
 }
 
 export interface SymbolTable {
@@ -29,7 +31,7 @@ export interface SymbolTable {
     name: string,
     nodeId: string,
     type: NodeLabel,
-    metadata?: { parameterCount?: number; requiredParameterCount?: number; parameterTypes?: string[]; returnType?: string; declaredType?: string; ownerId?: string }
+    metadata?: { parameterCount?: number; requiredParameterCount?: number; parameterTypes?: string[]; returnType?: string; declaredType?: string; ownerId?: string; initializerCallName?: string }
   ) => void;
 
   /**
@@ -109,7 +111,7 @@ export const createSymbolTable = (): SymbolTable => {
     name: string,
     nodeId: string,
     type: NodeLabel,
-    metadata?: { parameterCount?: number; requiredParameterCount?: number; parameterTypes?: string[]; returnType?: string; declaredType?: string; ownerId?: string }
+    metadata?: { parameterCount?: number; requiredParameterCount?: number; parameterTypes?: string[]; returnType?: string; declaredType?: string; ownerId?: string; initializerCallName?: string }
   ) => {
     const def: SymbolDefinition = {
       nodeId,
@@ -121,6 +123,7 @@ export const createSymbolTable = (): SymbolTable => {
       ...(metadata?.returnType !== undefined ? { returnType: metadata.returnType } : {}),
       ...(metadata?.declaredType !== undefined ? { declaredType: metadata.declaredType } : {}),
       ...(metadata?.ownerId !== undefined ? { ownerId: metadata.ownerId } : {}),
+      ...(metadata?.initializerCallName !== undefined ? { initializerCallName: metadata.initializerCallName } : {}),
     };
 
     // A. Add to File Index (shared reference — zero additional memory)
@@ -142,6 +145,11 @@ export const createSymbolTable = (): SymbolTable => {
       fieldByOwner.set(`${metadata.ownerId}\0${name}`, def);
       // Still add to fileIndex above (for lookupExact), but skip globalIndex
       return;
+    }
+
+    // B2. Class/struct member `Const` / `Variable` (e.g. Cangjie `private let x = foo()`)
+    if ((type === 'Const' || type === 'Variable') && metadata?.ownerId) {
+      fieldByOwner.set(`${metadata.ownerId}\0${name}`, def);
     }
 
     // C. Add to Global Index (same object reference)

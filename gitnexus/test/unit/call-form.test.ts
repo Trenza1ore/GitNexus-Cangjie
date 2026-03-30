@@ -455,6 +455,25 @@ public class X {
         baseReceiverName: 'svc',
       });
     });
+
+    it('flat postfix this.field.method(): extractReceiverName undefined and mixed chain has the field', () => {
+      parser.setLanguage(cangjie);
+      const code = `package p
+public class P {
+  private let svc = getSvc()
+  public func getSaveToGallery(): Bool { return this.svc.getSaveToGallery() }
+}`;
+      const captures = extractCallCaptures(parser, code, SupportedLanguages.Cangjie);
+      const match = captures.find(c => c.calledName === 'getSaveToGallery');
+      expect(match).toBeDefined();
+      expect(extractReceiverName(match!.nameNode)).toBeUndefined();
+      const receiverNode = extractReceiverNode(match!.nameNode);
+      expect(receiverNode?.type).toBe('postfixExpression');
+      expect(extractMixedChain(receiverNode!)).toEqual({
+        chain: [{ kind: 'field', name: 'svc' }],
+        baseReceiverName: 'this',
+      });
+    });
   });
 });
 

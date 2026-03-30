@@ -1306,9 +1306,11 @@ const processFileGroup = (
             let receiverMixedChain: MixedChainStep[] | undefined;
 
             // When the receiver is a complex expression (call chain, field chain, or mixed),
-            // extractReceiverName returns undefined. Walk the receiver node to build a unified
-            // mixed chain for deferred resolution in processCallsFromExtracted.
-            if (callForm === 'member' && receiverName === undefined && !receiverTypeName) {
+            // extractReceiverName is often undefined. Also try when it is only `this`/`super`:
+            // flat Cangjie `this.field.method()` can regress to a bare `this` name while
+            // extractReceiverNode still carries the full postfix for extractMixedChain.
+            if (callForm === 'member' && !receiverTypeName
+              && (receiverName === undefined || receiverName === 'this' || receiverName === 'super')) {
               const receiverNode = extractReceiverNode(callNameNode);
               if (receiverNode) {
                 const extracted = extractMixedChain(receiverNode);

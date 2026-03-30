@@ -575,18 +575,16 @@ export const processCalls = async (
           receiverTypeName = receiverName;
         }
       }
-      // `this` / `super`: TypeEnv often has no binding — use enclosing class/struct name for member resolution.
-      if (!receiverTypeName && receiverName && callForm === 'member' && (receiverName === 'this' || receiverName === 'super')) {
-        receiverTypeName = findEnclosingClassLikeTypeName(callNode, language);
-      }
       // Hoist sourceId so it's available for ACCESSES edge emission during chain walk.
       const enclosingFuncId = findEnclosingFunction(callNode, file.path, ctx, provider);
       const sourceId = enclosingFuncId || generateId('File', file.path);
 
-      // Fall back to mixed chain resolution when the receiver is a complex expression
-      // (field chain, call chain, or interleaved — e.g. user.address.city.save() or
-      // svc.getUser().address.save()). Handles all cases with a single unified walk.
-      if (callForm === 'member' && !receiverTypeName && !receiverName) {
+      // Mixed chain before `this`/`super` → enclosing class: flat Cangjie `this.field.method()`
+      // can make extractReceiverName return `this` if receiver extraction regresses; seeding the
+      // enclosing class first would skip this block and collapse to same-file self-calls when the
+      // callee name exists on both types (e.g. forwarding methods).
+      if (callForm === 'member' && !receiverTypeName
+        && (!receiverName || receiverName === 'this' || receiverName === 'super')) {
         const receiverNode = extractReceiverNode(nameNode);
         if (receiverNode) {
           const extracted = extractMixedChain(receiverNode);
@@ -616,6 +614,10 @@ export const processCalls = async (
             );
           }
         }
+      }
+      // `this` / `super`: TypeEnv often has no binding — use enclosing class/struct name for member resolution.
+      if (!receiverTypeName && receiverName && callForm === 'member' && (receiverName === 'this' || receiverName === 'super')) {
+        receiverTypeName = findEnclosingClassLikeTypeName(callNode, language);
       }
 
       // Build overload hints for languages with inferLiteralType (Java/Kotlin/C#/C++).

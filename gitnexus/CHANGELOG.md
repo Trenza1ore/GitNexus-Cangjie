@@ -2,6 +2,26 @@
 
 All notable changes to GitNexus will be documented in this file.
 
+## [1.4.10-cj.post8] - 2026-03-27
+
+### Changed
+
+- **Release tag** — `package.json` version **`1.4.10-cj.post8`**; functional Cangjie call-graph work remains as documented under **post7** (flat `this.field.method()` receiver extraction, mixed-chain ordering in **`processCalls`** / **parse-worker**, **`resolveCangjiePostfixCallReceiverNode`**, **`extractMixedChainFromFlatCangjiePrefix`**, tests in **`call-form`**).
+
+### Documentation
+
+- **Operator note** — Misleading **self-`CALLS`** on forwarded methods (e.g. `getSaveToGallery` on a provider) were traced to **missing callee symbols** when **`tree-sitter-cangjie`** hits **`ERROR`** nodes mid-file; once the service method exists in the graph, receiver typing and **`resolveCallTarget`** widening behave as intended.
+
+### Known issues (Cangjie / `tree-sitter-cangjie`)
+
+- **String templates `${…}`** — The grammar does **not** treat Kotlin-style **`"…${expr}…"`** as a single string literal. **`${`** commonly breaks string parsing, inserts **`ERROR`** nodes, and can desynchronize the rest of a **`classBody`** so **methods below the first fault are not extracted** (queries miss definitions → call graph looks wrong or **same-file-only** for ambiguous names). **Mitigation for indexed repos:** replace with **concatenation** (e.g. `"msg: " + value`) or other syntax the grammar accepts; re-run **`gitnexus analyze`**.
+- **`try` / `catch` reported as `ERROR`** — Often a **downstream** effect of a bad string (or other syntax) earlier in the same function; fix the first **`ERROR`** first, then re-parse.
+- **Toolchain vs index** — Sources that **compile** with the official Cangjie toolchain may still **partially fail** tree-sitter; treat graph completeness as **best-effort** relative to grammar coverage.
+
+### Changed files (gitnexus package)
+
+`CHANGELOG.md`, `package.json` (version `1.4.10-cj.post8`).
+
 ## [1.4.10-cj.post7] - 2026-03-27
 
 ### Analysis (Cangjie call graph)
@@ -20,6 +40,7 @@ All notable changes to GitNexus will be documented in this file.
 - **Symbol table** — `Const` / `Variable` with `ownerId` in `fieldByOwner`; **`parsing-processor`** forwards **`initializerCallName`** when merging worker symbols; sequential parse path aligns (`Const` → `HAS_PROPERTY`, Cangjie `userType` → `declaredType`).
 - **Cangjie Method vs Function (recovery)** — `findCangjieTuLevelMemberOwningClass` (ERROR-gated), `findEnclosingClassId` / `findEnclosingClassLikeTypeName` optional language + Cangjie TU fallback, `extractFunctionName` + `labelOverride` return **`Method`**; removed duplicate **`@definition.method`** query patterns to avoid double matches.
 - **Call processor / workers** — Pass **`SupportedLanguages`** into enclosing-class helpers where the Cangjie fallback is needed.
+- **Cangjie flat `this.field.method()`** — `postfixExpression` often lists `this`, each `fieldAccess`, then `callSuffix`. Using only `firstNamedChild` as the receiver yielded `this`, skipped mixed-chain extraction, and sequential call resolution seeded the enclosing class so `resolveCallTarget` kept the same-file method when the callee name matched a forwarder (e.g. `getSaveToGallery`). **`resolveCangjiePostfixCallReceiverNode`** + **`extractMixedChainFromFlatCangjiePrefix`** fix extraction; **`processCalls`** runs mixed-chain resolution **before** `this`/`super` → enclosing class, and **parse-worker** retries mixed chain when the receiver name is only `this`/`super`.
 
 ### Added
 
@@ -27,7 +48,7 @@ All notable changes to GitNexus will be documented in this file.
 
 ### Changed files (gitnexus package)
 
-`call-processor.ts`, `languages/cangjie.ts`, `parsing-processor.ts`, `symbol-table.ts`, `tree-sitter-queries.ts`, `type-extractors/shared.ts`, `utils/ast-helpers.ts`, `utils/call-analysis.ts`, `workers/parse-worker.ts`, `package.json`, `test/unit/call-form.test.ts`, `test/unit/call-processor.test.ts`, plus new fixtures/tests listed above.
+`call-processor.ts`, `languages/cangjie.ts`, `parsing-processor.ts`, `symbol-table.ts`, `tree-sitter-queries.ts`, `type-extractors/shared.ts`, `utils/ast-helpers.ts`, `utils/call-analysis.ts`, `workers/parse-worker.ts`, `package.json`, `test/unit/call-form.test.ts` (Cangjie flat `this.field.method()`), `test/unit/call-processor.test.ts`, plus new fixtures/tests listed above.
 
 ## [1.4.10-cj] - 2026-03-27
 

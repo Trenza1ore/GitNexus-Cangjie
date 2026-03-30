@@ -188,6 +188,30 @@ const SIMPLE_RECEIVER_TYPES = new Set([
   'thisSuperExpression', // Cangjie: this / super
 ]);
 
+/**
+ * Cangjie flat postfix: `this`, then `fieldAccess` segments, then callee `fieldAccess` + `callSuffix`.
+ * Using only `firstNamedChild` yields `this` for `this.svc.method()` and drops the `svc` hop.
+ */
+const resolveCangjiePostfixCallReceiverNode = (nameNode: SyntaxNode): SyntaxNode | undefined => {
+  let p: SyntaxNode | null = nameNode.parent;
+  while (p && p.type !== 'fieldAccess') p = p.parent;
+  if (p?.type !== 'fieldAccess') return undefined;
+  const innerPostfix = p.parent;
+  if (innerPostfix?.type !== 'postfixExpression') return undefined;
+
+  const named = innerPostfix.namedChildren.filter(c => c.type !== 'comment');
+  const n = named.length;
+  if (n >= 2 && named[n - 1]?.type === 'callSuffix' && named[n - 2]?.type === 'fieldAccess') {
+    const prefix = named.slice(0, n - 2);
+    if (prefix.length === 1 && SIMPLE_RECEIVER_TYPES.has(prefix[0].type)) {
+      return prefix[0];
+    }
+    return innerPostfix;
+  }
+
+  return innerPostfix.firstNamedChild ?? undefined;
+};
+
 export const extractReceiverName = (
   nameNode: SyntaxNode,
 ): string | undefined => {
@@ -266,16 +290,9 @@ export const extractReceiverName = (
     }
   }
 
-  // Cangjie: fieldAccess inside postfixExpression — receiver is first named child of inner postfix
+  // Cangjie: flat `this.field.method()` vs `this.method()` — see resolveCangjiePostfixCallReceiverNode
   if (!receiver) {
-    let p: SyntaxNode | null = nameNode.parent;
-    while (p && p.type !== 'fieldAccess') p = p.parent;
-    if (p?.type === 'fieldAccess') {
-      const innerPostfix = p.parent;
-      if (innerPostfix?.type === 'postfixExpression') {
-        receiver = innerPostfix.firstNamedChild;
-      }
-    }
+    receiver = resolveCangjiePostfixCallReceiverNode(nameNode) ?? null;
   }
 
   if (!receiver) return undefined;
@@ -367,14 +384,7 @@ export const extractReceiverNode = (
   }
 
   if (!receiver) {
-    let p: SyntaxNode | null = nameNode.parent;
-    while (p && p.type !== 'fieldAccess') p = p.parent;
-    if (p?.type === 'fieldAccess') {
-      const innerPostfix = p.parent;
-      if (innerPostfix?.type === 'postfixExpression') {
-        receiver = innerPostfix.firstNamedChild;
-      }
-    }
+    receiver = resolveCangjiePostfixCallReceiverNode(nameNode) ?? null;
   }
 
   return receiver ?? undefined;
@@ -598,10 +608,48 @@ const extractCangjieFieldOnlyPostfixChain = (
   return { chain, baseReceiverName };
 };
 
+/**
+ * Flat Cangjie prefix before the outer `.callee()`: `[this, .a, .b]` or nested postfix + fields.
+ * Mutually recursive with {@link extractMixedChain} (function declarations hoisted).
+ */
+function extractMixedChainFromFlatCangjiePrefix(
+  parts: SyntaxNode[],
+): { chain: MixedChainStep[]; baseReceiverName: string | undefined } | undefined {
+  if (parts.length < 2) return undefined;
+  const base = parts[0];
+  const fieldSteps: MixedChainStep[] = [];
+  for (let i = 1; i < parts.length; i++) {
+    if (parts[i].type !== 'fieldAccess') return undefined;
+    const nm = cangjieFieldAccessMethodName(parts[i]);
+    if (!nm) return undefined;
+    fieldSteps.push({ kind: 'field', name: nm });
+  }
+  if (base.type === 'thisSuperExpression' || base.type === 'atomicVariable' || base.type === 'identifier') {
+    return { chain: fieldSteps, baseReceiverName: base.text };
+  }
+  if (base.type === 'postfixExpression') {
+    const inner = extractMixedChain(base);
+    if (!inner) return undefined;
+    return { chain: [...inner.chain, ...fieldSteps], baseReceiverName: inner.baseReceiverName };
+  }
+  return undefined;
+}
+
 export function extractMixedChain(
   receiverNode: SyntaxNode,
 ): { chain: MixedChainStep[]; baseReceiverName: string | undefined } | undefined {
   if (receiverNode.type === 'postfixExpression') {
+    const named = receiverNode.namedChildren.filter(c => c.type !== 'comment');
+    const n = named.length;
+    if (n >= 2 && named[n - 1]?.type === 'callSuffix' && named[n - 2]?.type === 'fieldAccess') {
+      const pre = named.slice(0, n - 2);
+      if (pre.length === 1 && pre[0].type === 'postfixExpression') {
+        const nested = extractMixedChain(pre[0]);
+        if (nested && nested.chain.length > 0) return nested;
+      }
+      const flat = extractMixedChainFromFlatCangjiePrefix(pre);
+      if (flat && flat.chain.length > 0) return flat;
+    }
     const cjCall = extractCangjiePostfixCallChainFromReceiver(receiverNode);
     if (cjCall) return cjCall;
     const cjField = extractCangjieFieldOnlyPostfixChain(receiverNode);

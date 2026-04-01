@@ -50,6 +50,8 @@ export interface AnalyzeOptions {
   verbose?: boolean;
   /** Index the folder even when no .git directory is present. */
   skipGit?: boolean;
+  /** Skip non-essential graph construction phases to save memory. */
+  skipGraphPhases?: boolean;
 }
 
 /** Threshold: auto-skip embeddings for repos with more nodes than this */
@@ -217,11 +219,15 @@ export const analyzeCommand = async (
   }
 
   // ── Phase 1: Full Pipeline (0–60%) ─────────────────────────────────
-  const pipelineResult = await runPipelineFromRepo(repoPath, (progress) => {
-    const phaseLabel = PHASE_LABELS[progress.phase] || progress.phase;
-    const scaled = Math.round(progress.percent * 0.6);
-    updateBar(scaled, phaseLabel);
-  });
+  const pipelineResult = await runPipelineFromRepo(
+    repoPath,
+    (progress) => {
+      const phaseLabel = PHASE_LABELS[progress.phase] || progress.phase;
+      const scaled = Math.round(progress.percent * 0.6);
+      updateBar(scaled, phaseLabel);
+    },
+    { skipGraphPhases: options?.skipGraphPhases },
+  );
 
   // ── Phase 2: LadybugDB (60–85%) ──────────────────────────────────────
   updateBar(60, 'Loading into LadybugDB...');
